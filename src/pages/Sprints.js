@@ -5,6 +5,13 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 const API_BASE = 'http://localhost:3001/api';
 const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
 
+const BRAND_COLORS = {
+  XYPOS: '#3b82f6',
+  OMSXY: '#22c55e',
+  BEYON: '#8b5cf6',
+  FAB: '#f59e0b',
+};
+
 function Sprints() {
   const [sprintData, setSprintData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
@@ -112,6 +119,31 @@ function Sprints() {
     fetchData();
   }, [selectedSprints]);
 
+  const [exporting, setExporting] = React.useState(false);
+  const [exportMsg, setExportMsg] = React.useState('');
+
+  const exportToSheets = async () => {
+    setExporting(true);
+    setExportMsg('');
+    try {
+      const headers = ['Project', 'Sprint', 'Status', 'Count', 'Total', 'Completed', 'Complete %'];
+      const rows = [];
+      for (const project of PROJECTS) {
+        const d = sprintData[project] || {};
+        const s = d.statusCounts || {};
+        Object.entries(s).forEach(([status, count]) => {
+          rows.push([project, d.sprintName || '', status, count, d.total || 0, d.completed || 0, d.donePct || 0]);
+        });
+      }
+      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Sprints_Snapshot', headers, rows });
+      setExportMsg('✅ Exported to Google Sheets');
+    } catch (err) {
+      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
+    }
+    setExporting(false);
+    setTimeout(() => setExportMsg(''), 4000);
+  };
+
   if (loading) return <div className="loading">Loading sprints...</div>;
 
   const data = sprintData[selectedProject] || {};
@@ -122,7 +154,15 @@ function Sprints() {
 
   return (
     <div>
-      <h1 className="page-title">🗂 Active Sprints</h1>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+        <h1 className="page-title" style={{margin: 0}}>🗂 Active Sprints</h1>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
+          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
+            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+          </button>
+        </div>
+      </div>
 
       <div style={{marginBottom: 24, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
         {PROJECTS.map(p => (
@@ -152,10 +192,15 @@ function Sprints() {
         )}
       </div>
 
-      <div className="card" style={{marginBottom: 20}}>
+      <div className="card" style={{marginBottom: 20, borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
           <div>
-            <h3 style={{fontSize: 18, color: '#1a1a2e', textTransform: 'none', marginBottom: 4}}>{selectedProject} — {data.sprintName}</h3>
+            <div style={{marginBottom: 6}}>
+              <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
+                {selectedProject}
+              </span>
+            </div>
+            <h3 style={{fontSize: 18, color: '#1a1a2e', textTransform: 'none', marginBottom: 4}}>{data.sprintName}</h3>
             <p style={{fontSize: 13, color: '#888'}}>
               {data.startDate ? new Date(data.startDate).toLocaleDateString() : ''} → {data.endDate ? new Date(data.endDate).toLocaleDateString() : ''}
             </p>

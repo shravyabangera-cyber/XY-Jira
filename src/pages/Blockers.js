@@ -5,6 +5,13 @@ import { useLocation } from 'react-router-dom';
 const API_BASE = 'http://localhost:3001/api';
 const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
 
+const BRAND_COLORS = {
+  XYPOS: '#3b82f6',
+  OMSXY: '#22c55e',
+  BEYON: '#8b5cf6',
+  FAB: '#f59e0b',
+};
+
 function Blockers() {
   const [blockerData, setBlockerData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
@@ -66,6 +73,36 @@ function Blockers() {
     fetchData();
   }, [selectedSprints]);
 
+  const [exporting, setExporting] = React.useState(false);
+  const [exportMsg, setExportMsg] = React.useState('');
+
+  const exportToSheets = async () => {
+    setExporting(true);
+    setExportMsg('');
+    try {
+      const headers = ['Project', 'Ticket', 'Summary', 'Status', 'Assignee', 'Blocker Reason'];
+      const rows = [];
+      for (const project of PROJECTS) {
+        for (const issue of (blockerData[project] || [])) {
+          rows.push([
+            project,
+            issue.key,
+            issue.fields?.summary || '',
+            issue.fields?.status?.name || '',
+            issue.fields?.assignee?.displayName || 'Unassigned',
+            issue.fields?.customfield_10855?.value || 'Blocked',
+          ]);
+        }
+      }
+      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Blockers_Snapshot', headers, rows });
+      setExportMsg('✅ Exported to Google Sheets');
+    } catch (err) {
+      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
+    }
+    setExporting(false);
+    setTimeout(() => setExportMsg(''), 4000);
+  };
+
   if (loading) return <div className="loading">Loading blockers...</div>;
 
   const blockers = blockerData[selectedProject] || [];
@@ -73,7 +110,15 @@ function Blockers() {
 
   return (
     <div>
-      <h1 className="page-title">🚨 Blockers</h1>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+        <h1 className="page-title" style={{margin: 0}}>🚨 Blockers</h1>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
+          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
+            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+          </button>
+        </div>
+      </div>
       <div style={{marginBottom: 24, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
         {PROJECTS.map(p => (
           <button
@@ -111,7 +156,12 @@ function Blockers() {
           <p style={{color: '#22c55e', fontWeight: 600}}>✅ No blockers found for {selectedProject}!</p>
         </div>
       ) : (
-        <div className="table-container">
+        <div className="table-container" style={{borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
+          <div style={{marginBottom: 10}}>
+            <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
+              {selectedProject}
+            </span>
+          </div>
           <table>
             <thead>
               <tr>

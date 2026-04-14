@@ -9,6 +9,13 @@ import { useNavigate } from 'react-router-dom';
 const API_BASE = 'http://localhost:3001/api';
 const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
 
+const BRAND_COLORS = {
+  XYPOS: '#3b82f6',
+  OMSXY: '#22c55e',
+  BEYON: '#8b5cf6',
+  FAB: '#f59e0b',
+};
+
 const RAG_COLORS = { GREEN: '#22c55e', AMBER: '#f59e0b', RED: '#ef4444' };
 
 function getRAG(donePct, blockers) {
@@ -26,6 +33,42 @@ function Dashboard() {
   const [activeSprints, setActiveSprints] = useState({});
   const [selectedSprints, setSelectedSprints] = useState({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
+
+  const exportToSheets = async () => {
+    setExporting(true);
+    setExportMsg('');
+    try {
+      const headers = ['Project', 'Sprint', 'Backlog', 'Solutioning', 'In Progress', 'QA', 'UAT', 'Done', 'Deployed', 'Blockers', 'Complete %', 'RAG'];
+      const rows = PROJECTS.map(project => {
+        const data = projectData[project] || {};
+        const s = data.statusCounts || {};
+        const sprints = activeSprints[project] || [];
+        const selectedSprint = sprints.find(sp => sp.id === selectedSprints[project]);
+        return [
+          project,
+          selectedSprint?.name || '',
+          s.Backlog || 0,
+          s['Solutioning'] || 0,
+          s['In Progress'] || 0,
+          s.QA || 0,
+          s.UAT || 0,
+          s.Done || 0,
+          s.Deployed || 0,
+          data.blockers || 0,
+          data.donePct || 0,
+          data.rag || '',
+        ];
+      });
+      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Dashboard_Snapshot', headers, rows });
+      setExportMsg('✅ Exported to Google Sheets');
+    } catch (err) {
+      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
+    }
+    setExporting(false);
+    setTimeout(() => setExportMsg(''), 4000);
+  };
  
 
   useEffect(() => {
@@ -117,7 +160,15 @@ function Dashboard() {
 
   return (
     <div>
-      <h1 className="page-title">📊 Dashboard</h1>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+        <h1 className="page-title" style={{margin: 0}}>📊 Dashboard</h1>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
+          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
+            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+          </button>
+        </div>
+      </div>
 
       {/* Project Cards */}
       <div className="cards-grid">
@@ -235,13 +286,21 @@ function Dashboard() {
 
       {/* Sprint Status Table */}
       <div className="table-container">
-        <h2 style={{marginBottom: 16, fontSize: 18}}>Sprint Status Overview</h2>
+        <div style={{display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap'}}>
+          <h2 style={{margin: 0, fontSize: 18}}>Sprint Status Overview</h2>
+          {PROJECTS.map(p => (
+            <span key={p} style={{background: BRAND_COLORS[p] + '18', color: BRAND_COLORS[p], border: `1.5px solid ${BRAND_COLORS[p]}50`, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
+              {p}
+            </span>
+          ))}
+        </div>
         <table>
           <thead>
             <tr>
               <th>Project</th>
               <th>Sprint</th>
               <th>Backlog</th>
+              <th>Solutioning</th>
               <th>In Progress</th>
               <th>QA</th>
               <th>UAT</th>
@@ -261,7 +320,11 @@ function Dashboard() {
               const badgeClass = data.rag === 'GREEN' ? 'badge-green' : data.rag === 'AMBER' ? 'badge-amber' : 'badge-red';
               return (
                 <tr key={project}>
-                  <td><strong>{project}</strong></td>
+                  <td>
+                    <span style={{background: BRAND_COLORS[project] + '18', color: BRAND_COLORS[project], border: `1.5px solid ${BRAND_COLORS[project]}50`, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
+                      {project}
+                    </span>
+                  </td>
                   <td style={{fontSize: 12, color: '#888'}}>{selectedSprint?.name || ''}</td>
                   <td>{s.Backlog || 0}</td>
                   <td>{s['In Progress'] || 0}</td>

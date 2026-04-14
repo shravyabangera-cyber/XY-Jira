@@ -4,6 +4,13 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:3001/api';
 const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
 
+const BRAND_COLORS = {
+  XYPOS: '#3b82f6',
+  OMSXY: '#22c55e',
+  BEYON: '#8b5cf6',
+  FAB: '#f59e0b',
+};
+
 const ANNOUNCEMENTS = {
   XYPOS: 'POS Sprint 8 — Running 17 Mar to 31 Mar 2026',
   OMSXY: 'OMSXY Sprint 4 — Running 17 Mar to 31 Mar 2026',
@@ -14,6 +21,37 @@ const ANNOUNCEMENTS = {
 function ReleaseNotes() {
   const [releaseData, setReleaseData] = useState({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
+
+  const exportToSheets = async () => {
+    setExporting(true);
+    setExportMsg('');
+    try {
+      const headers = ['Project', 'Sprint', 'Ticket', 'Summary', 'Assignee'];
+      const rows = [];
+      for (const project of PROJECTS) {
+        const sprintGroups = releaseData[project]?.sprintGroups || {};
+        for (const [sprintName, issues] of Object.entries(sprintGroups)) {
+          for (const issue of issues) {
+            rows.push([
+              project,
+              sprintName,
+              issue.key,
+              issue.fields?.summary || '',
+              issue.fields?.assignee?.displayName || 'Unassigned',
+            ]);
+          }
+        }
+      }
+      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'ReleaseNotes_Snapshot', headers, rows });
+      setExportMsg('✅ Exported to Google Sheets');
+    } catch (err) {
+      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
+    }
+    setExporting(false);
+    setTimeout(() => setExportMsg(''), 4000);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -36,7 +74,15 @@ function ReleaseNotes() {
 
   return (
     <div>
-      <h1 className="page-title">📝 Release Notes</h1>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+        <h1 className="page-title" style={{margin: 0}}>📝 Release Notes</h1>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
+          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
+            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+          </button>
+        </div>
+      </div>
 
       {PROJECTS.map(project => {
         const data = releaseData[project] || {};
@@ -44,10 +90,13 @@ function ReleaseNotes() {
         const sprintNames = Object.keys(sprintGroups);
 
         return (
-          <div key={project} className="card" style={{marginBottom: 24}}>
+          <div key={project} className="card" style={{marginBottom: 24, borderLeft: `4px solid ${BRAND_COLORS[project]}`}}>
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
               <div>
-                <h2 style={{fontSize: 20, fontWeight: 700, color: '#1a1a2e'}}>{project}</h2>
+                <span style={{background: BRAND_COLORS[project] + '18', color: BRAND_COLORS[project], border: `1.5px solid ${BRAND_COLORS[project]}50`, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700, display: 'inline-block', marginBottom: 6}}>
+                  {project}
+                </span>
+                <h2 style={{fontSize: 20, fontWeight: 700, color: '#1a1a2e', margin: 0}}>{project}</h2>
                 <p style={{fontSize: 13, color: '#888', marginTop: 4}}>{ANNOUNCEMENTS[project]}</p>
               </div>
               <span className="badge badge-blue">🚀 Total Deployed: {data.total || 0}</span>

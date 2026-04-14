@@ -4,6 +4,13 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:3001/api';
 const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
 
+const BRAND_COLORS = {
+  XYPOS: '#3b82f6',
+  OMSXY: '#22c55e',
+  BEYON: '#8b5cf6',
+  FAB: '#f59e0b',
+};
+
 function Resources() {
   const [resourceData, setResourceData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
@@ -82,6 +89,29 @@ function Resources() {
     fetchData();
   }, [selectedSprints]);
 
+  const [exporting, setExporting] = React.useState(false);
+  const [exportMsg, setExportMsg] = React.useState('');
+
+  const exportToSheets = async () => {
+    setExporting(true);
+    setExportMsg('');
+    try {
+      const headers = ['Project', 'Name', 'Total', 'In Progress', 'QA', 'UAT', 'Backlog', 'Done', 'Deployed'];
+      const rows = [];
+      for (const project of PROJECTS) {
+        for (const person of (resourceData[project] || [])) {
+          rows.push([project, person.name, person.total, person.inProgress, person.qa, person.uat, person.backlog, person.done, person.deployed]);
+        }
+      }
+      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Resources_Snapshot', headers, rows });
+      setExportMsg('✅ Exported to Google Sheets');
+    } catch (err) {
+      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
+    }
+    setExporting(false);
+    setTimeout(() => setExportMsg(''), 4000);
+  };
+
   if (loading) return <div className="loading">Loading resources...</div>;
 
   const people = (resourceData[selectedProject] || []).filter(p =>
@@ -91,7 +121,15 @@ function Resources() {
 
   return (
     <div>
-      <h1 className="page-title">👥 Resource Utilization</h1>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+        <h1 className="page-title" style={{margin: 0}}>👥 Resource Utilization</h1>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
+          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
+            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+          </button>
+        </div>
+      </div>
       
       <div style={{marginBottom: 16}}>
         <input
@@ -131,7 +169,12 @@ function Resources() {
         )}
       </div>
 
-      <div className="table-container">
+      <div className="table-container" style={{borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
+        <div style={{marginBottom: 10}}>
+          <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
+            {selectedProject}
+          </span>
+        </div>
         <table>
           <thead>
             <tr>

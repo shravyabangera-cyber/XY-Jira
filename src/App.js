@@ -10,6 +10,7 @@ import ReleaseNotes from './pages/ReleaseNotes';
 import Search from './pages/Search';
 import TeamMember from './pages/TeamMember';
 import SprintComparison from './pages/SprintComparison';
+import CycleTime from './pages/CycleTime';
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
             <li><Link to="/release-notes">📝 Release Notes</Link></li>
             <li><Link to="/search">🔍 Search</Link></li>
             <li><Link to="/sprint-comparison">📈 Sprint Comparison</Link></li>
+            <li><Link to="/cycle-time">⏱ Cycle Time</Link></li>
           </ul>
         </nav>
         <main className="main-content">
@@ -42,6 +44,7 @@ function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/member/:name" element={<TeamMember />} />
             <Route path="/sprint-comparison" element={<SprintComparison />} />
+            <Route path="/cycle-time" element={<CycleTime />} />
           </Routes>
         </main>
       </div>

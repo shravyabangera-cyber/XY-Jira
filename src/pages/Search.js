@@ -3,6 +3,7 @@ import axios from 'axios';
 
 const API_BASE = 'http://localhost:3001/api';
 
+
 function Search() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
