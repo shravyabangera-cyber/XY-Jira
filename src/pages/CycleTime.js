@@ -1,70 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MultiSelect from './MultiSelect';
-
-const API_BASE = 'http://localhost:3001/api';
-const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
-
-const MEMBER_GROUPS = {
-  'Malavika Bangera': 'Backend',
-  'Tanvith Shenoy': 'Backend',
-  'Vijayalakshmi': 'Backend',
-  'Vikhyath Karanth': 'Backend',
-  'Yash Balla': 'Backend',
-  'bhavith.adyanthaya': 'Backend',
-  'kirti.Shetty': 'Backend',
-  'Deepthi Poojary': 'Backend',
-  'Kavya': 'Backend',
-  'Lohit J': 'Backend',
-  'Mohammed Arbaz': 'Backend',
-  'Neha Shetty': 'Frontend',
-  "Nithin D'sa": 'Frontend',
-  'Preetham Pai': 'Frontend',
-  'Prithvi Dsouza': 'Frontend',
-  'Salvatore Raso': 'Frontend',
-  'Swapna': 'Frontend',
-  'anusha.udupa': 'Frontend',
-  'Ananthapadma S': 'Integration',
-  'Gowtam C S': 'QA',
-  'Mimitha Shetty': 'QA',
-  'Shaima Kadar': 'QA',
-  'Varshini M': 'QA',
-  'Nihal Hassan': 'UI/UX',
-  'Vishal Veigas': 'UI/UX',
-  'Alec Rego': 'CST',
-  'Alex Colucci': 'CST',
-  'Ankith Karkera': 'CST',
-  'Christopher Almeida': 'CST',
-  'Elbon Dsouza': 'CST',
-  'Prathiksha K': 'CST',
-  'Renata': 'CST',
-  'Ruben Pinto': 'CST',
-  'Suman Chandra N': 'CST',
-  'rajeev.belani': 'CST',
-  'santhosh.kumar': 'CST',
-  'shreyas.rao': 'CST',
-  'vinay shukla': 'CST',
-  'Ryan Dsouza': 'Marketing',
-};
-
-const GROUP_COLORS = {
-  'Backend': '#3b82f6',
-  'Frontend': '#22c55e',
-  'Integration': '#f59e0b',
-  'QA': '#8b5cf6',
-  'UI/UX': '#06b6d4',
-  'CST': '#ef4444',
-  'Marketing': '#ec4899',
-};
-
-const ALL_TEAMS = ['Backend', 'Frontend', 'Integration', 'QA', 'UI/UX', 'CST', 'Marketing'];
-
-const BRAND_COLORS = {
-  XYPOS: '#3b82f6',
-  OMSXY: '#22c55e',
-  BEYON: '#8b5cf6',
-  FAB: '#f59e0b',
-};
+import {
+  API_BASE, PROJECTS, PROJ_COLORS, MEMBER_GROUPS, GROUP_COLORS, ALL_TEAMS,
+  Loading, ExportMsg, useExportMsg, exportToSheets, TeamBadge,
+} from '../utils';
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -73,106 +13,114 @@ function daysLabel(days) {
   return `${days}d`;
 }
 
-// ── Ticket sub-rows ────────────────────────────────────────────────────────────
-function TicketRows({ tickets }) {
-  return tickets.map(t => (
-    <tr key={t.key} style={{ background: '#fafafa' }}>
-      <td colSpan={3} style={{ paddingLeft: 32, fontSize: 12, color: '#555' }}>
-        <a
-          href={`https://xyretail.atlassian.net/browse/${t.key}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: '#2563eb', fontWeight: 600, marginRight: 8 }}
-        >
-          {t.key}
-        </a>
-        {t.summary}
-      </td>
-      <td style={{ fontSize: 12, color: '#555' }}>{daysLabel(t.days)}</td>
-      <td style={{ fontSize: 12, color: '#888' }}>
-        {t.inProgressAt
-          ? new Date(t.inProgressAt).toLocaleDateString()
-          : t.qaAssignedAt
-          ? new Date(t.qaAssignedAt).toLocaleDateString()
-          : '-'}
-        {' → '}
-        {t.doneAt
-          ? new Date(t.doneAt).toLocaleDateString()
-          : t.uatOrDoneAt
-          ? new Date(t.uatOrDoneAt).toLocaleDateString()
-          : '-'}
-      </td>
-    </tr>
-  ));
+function mergeResults(resultsArray) {
+  const engMap = {}, qaMap = {};
+  let totalIssues = 0;
+  for (const r of resultsArray) {
+    totalIssues += r.totalIssues || 0;
+    for (const e of r.engineers || []) {
+      if (!engMap[e.name]) engMap[e.name] = { name: e.name, tickets: [] };
+      engMap[e.name].tickets.push(...e.tickets);
+    }
+    for (const q of r.qa || []) {
+      if (!qaMap[q.name]) qaMap[q.name] = { name: q.name, tickets: [] };
+      qaMap[q.name].tickets.push(...q.tickets);
+    }
+  }
+  const toSummary = map =>
+    Object.values(map).map(e => ({
+      name: e.name,
+      ticketCount: e.tickets.length,
+      avgDays: e.tickets.length > 0
+        ? Math.round(e.tickets.reduce((s, t) => s + t.days, 0) / e.tickets.length * 10) / 10
+        : 0,
+      tickets: e.tickets.sort((a, b) => b.days - a.days),
+    })).sort((a, b) => a.avgDays - b.avgDays);
+  return { engineers: toSummary(engMap), qa: toSummary(qaMap), totalIssues };
 }
 
-// ── Cycle time table ───────────────────────────────────────────────────────────
-function CycleTimeTable({ data, label, expandedRows, onToggle, selectedTeams }) {
+function CycleTimeTable({ data, label, color, selectedTeams, expandedRows, onToggle }) {
   const filtered = (data || []).filter(row => {
     if (selectedTeams.length === 0 || selectedTeams.length === ALL_TEAMS.length) return true;
     const team = MEMBER_GROUPS[row.name];
-    return team ? selectedTeams.includes(team) : false;
+    return team ? selectedTeams.includes(team) : selectedTeams.includes('Unassigned');
   });
 
-  if (filtered.length === 0) {
-    return <p style={{ color: '#888', fontSize: 14, marginBottom: 32 }}>No completed tickets found for {label}.</p>;
+  if (!filtered.length) {
+    return <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 24 }}>No completed tickets found for {label}.</p>;
   }
 
   return (
-    <div className="table-container" style={{ marginBottom: 32 }}>
-      <h3 style={{ fontSize: 15, color: '#1a1a2e', marginBottom: 12 }}>{label}</h3>
+    <div className="table-container" style={{ marginBottom: 18, borderLeft: `3px solid ${color}40` }}>
+      <div className="table-container-inner" style={{ paddingBottom: 0 }}>
+        <div className="section-title" style={{ color }}>{label}</div>
+      </div>
       <table>
         <thead>
           <tr>
             <th>Name</th>
             <th>Team</th>
-            <th>Tickets Completed</th>
-            <th>Avg Cycle Time</th>
-            <th></th>
+            <th>Tickets completed</th>
+            <th>Avg cycle time</th>
+            <th />
           </tr>
         </thead>
         <tbody>
           {filtered.map(row => {
-            const team = MEMBER_GROUPS[row.name];
-            const teamColor = GROUP_COLORS[team] || '#94a3b8';
+            const cls = row.avgDays <= 2 ? 'ct-good' : row.avgDays <= 5 ? 'ct-ok' : 'ct-slow';
+            const expanded = expandedRows[row.name];
             return (
               <React.Fragment key={row.name}>
                 <tr>
-                  <td style={{ fontWeight: 600 }}>{row.name}</td>
-                  <td>
-                    {team && (
-                      <span style={{
-                        background: teamColor + '20', color: teamColor,
-                        padding: '2px 8px', borderRadius: 10,
-                        fontSize: 11, fontWeight: 600,
-                      }}>
-                        {team}
-                      </span>
-                    )}
+                  <td style={{ fontWeight: 500 }}>
+                    <a href={`/member/${encodeURIComponent(row.name)}`} style={{ color: 'var(--emerald)', fontWeight: 500, textDecoration: 'none' }}>
+                      {row.name}
+                    </a>
                   </td>
+                  <td><TeamBadge name={row.name} /></td>
                   <td>{row.ticketCount}</td>
-                  <td>
-                    <span style={{
-                      background: row.avgDays <= 2 ? '#dcfce7' : row.avgDays <= 5 ? '#fef9c3' : '#fee2e2',
-                      color: row.avgDays <= 2 ? '#16a34a' : row.avgDays <= 5 ? '#ca8a04' : '#dc2626',
-                      padding: '2px 10px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-                    }}>
-                      {daysLabel(row.avgDays)}
-                    </span>
-                  </td>
+                  <td><span className={cls}>{daysLabel(row.avgDays)}</span></td>
                   <td>
                     <button
                       onClick={() => onToggle(row.name)}
-                      style={{
-                        background: 'none', border: '1px solid #ddd', borderRadius: 6,
-                        padding: '2px 10px', cursor: 'pointer', fontSize: 12, color: '#555',
-                      }}
+                      className="btn btn-ghost"
+                      style={{ fontSize: 11, padding: '3px 10px' }}
                     >
-                      {expandedRows[row.name] ? 'Hide' : 'Show tickets'}
+                      {expanded ? 'Hide' : 'Show tickets'}
                     </button>
                   </td>
                 </tr>
-                {expandedRows[row.name] && <TicketRows tickets={row.tickets} />}
+                {expanded && row.tickets.map(t => (
+                  <tr key={t.key} className="sub-row">
+                    <td colSpan={3} style={{ paddingLeft: 32, fontSize: 12, color: 'var(--text-2)' }}>
+                      <a
+                        href={`https://xyretail.atlassian.net/browse/${t.key}`}
+                        target="_blank" rel="noreferrer"
+                        style={{ color: 'var(--emerald)', fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 11, marginRight: 10 }}
+                      >
+                        {t.key}
+                      </a>
+                      {t.summary}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      <span className={t.days <= 2 ? 'ct-good' : t.days <= 5 ? 'ct-ok' : 'ct-slow'}>
+                        {daysLabel(t.days)}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      {t.inProgressAt
+                        ? new Date(t.inProgressAt).toLocaleDateString()
+                        : t.qaAssignedAt
+                        ? new Date(t.qaAssignedAt).toLocaleDateString()
+                        : '—'}{' → '}
+                      {t.doneAt
+                        ? new Date(t.doneAt).toLocaleDateString()
+                        : t.uatOrDoneAt
+                        ? new Date(t.uatOrDoneAt).toLocaleDateString()
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
               </React.Fragment>
             );
           })}
@@ -182,44 +130,7 @@ function CycleTimeTable({ data, label, expandedRows, onToggle, selectedTeams }) 
   );
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────────
-function mergeData(resultsArray) {
-  const engineerMap = {};
-  const qaMap = {};
-  let totalIssues = 0;
-
-  for (const result of resultsArray) {
-    totalIssues += result.totalIssues || 0;
-
-    for (const eng of result.engineers || []) {
-      if (!engineerMap[eng.name]) {
-        engineerMap[eng.name] = { name: eng.name, tickets: [] };
-      }
-      engineerMap[eng.name].tickets.push(...eng.tickets);
-    }
-
-    for (const q of result.qa || []) {
-      if (!qaMap[q.name]) {
-        qaMap[q.name] = { name: q.name, tickets: [] };
-      }
-      qaMap[q.name].tickets.push(...q.tickets);
-    }
-  }
-
-  const toSummary = (map) =>
-    Object.values(map).map(entry => ({
-      name: entry.name,
-      ticketCount: entry.tickets.length,
-      avgDays: entry.tickets.length > 0
-        ? Math.round(entry.tickets.reduce((s, t) => s + t.days, 0) / entry.tickets.length * 10) / 10
-        : 0,
-      tickets: entry.tickets.sort((a, b) => b.days - a.days),
-    })).sort((a, b) => a.avgDays - b.avgDays);
-
-  return { engineers: toSummary(engineerMap), qa: toSummary(qaMap), totalIssues };
-}
-
-function CycleTime() {
+export default function CycleTime() {
   const [selectedProjects, setSelectedProjects] = useState([...PROJECTS]);
   const [selectedTeams, setSelectedTeams] = useState([...ALL_TEAMS]);
   const [startDate, setStartDate] = useState('2026-01-01');
@@ -229,96 +140,81 @@ function CycleTime() {
     start: '2026-01-01',
     end: today(),
   });
-  const [data, setData] = useState(null);
+  const [ctData, setCtData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [expandedEngineer, setExpandedEngineer] = useState({});
+  const [expandedEng, setExpandedEng] = useState({});
   const [expandedQA, setExpandedQA] = useState({});
   const [exporting, setExporting] = useState(false);
-  const [exportMsg, setExportMsg] = useState('');
-
-  const exportToSheets = async () => {
-    if (!data) return;
-    setExporting(true);
-    setExportMsg('');
-    try {
-      const engHeaders = ['Type', 'Name', 'Team', 'Tickets Completed', 'Avg Days'];
-      const engRows = (data.engineers || []).map(row => [
-        'Engineer', row.name, MEMBER_GROUPS[row.name] || '', row.ticketCount, row.avgDays,
-      ]);
-      const qaRows = (data.qa || []).map(row => [
-        'QA', row.name, MEMBER_GROUPS[row.name] || '', row.ticketCount, row.avgDays,
-      ]);
-      await axios.post(`${API_BASE}/export-to-sheets`, {
-        sheetName: 'CycleTime_Snapshot',
-        headers: engHeaders,
-        rows: [...engRows, ...qaRows],
-      });
-      setExportMsg('✅ Exported to Google Sheets');
-    } catch (err) {
-      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
-    }
-    setExporting(false);
-    setTimeout(() => setExportMsg(''), 4000);
-  };
+  const [exportMsg, showExport] = useExportMsg();
 
   const fetchData = (projects, start, end) => {
-    if (projects.length === 0) { setData({ engineers: [], qa: [], totalIssues: 0 }); return; }
-    setLoading(true);
-    setError(null);
-    setData(null);
-    setExpandedEngineer({});
-    setExpandedQA({});
-
+    if (!projects.length) { setCtData({ engineers: [], qa: [], totalIssues: 0 }); return; }
+    setLoading(true); setError(null); setCtData(null);
+    setExpandedEng({}); setExpandedQA({});
     Promise.all(
       projects.map(p =>
-        axios.get(`${API_BASE}/cycle-time/${p}?startDate=${start}&endDate=${end}`)
-          .then(r => r.data)
+        axios.get(`${API_BASE}/cycle-time/${p}?startDate=${start}&endDate=${end}`).then(r => r.data)
       )
     )
-      .then(results => { setData(mergeData(results)); setLoading(false); })
+      .then(results => { setCtData(mergeResults(results)); setLoading(false); })
       .catch(err => { setError(err.message); setLoading(false); });
   };
 
+  // Auto-load on mount with defaults
   useEffect(() => {
     fetchData(appliedFilters.projects, appliedFilters.start, appliedFilters.end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleApply = () => {
-    const filters = { projects: selectedProjects, start: startDate, end: endDate };
-    setAppliedFilters(filters);
-    fetchData(filters.projects, filters.start, filters.end);
+    const f = { projects: selectedProjects, start: startDate, end: endDate };
+    setAppliedFilters(f);
+    fetchData(f.projects, f.start, f.end);
   };
 
-  const inputStyle = {
-    padding: '7px 10px', borderRadius: 8,
-    border: '1px solid #ddd', fontSize: 13,
+  const doExport = async () => {
+    if (!ctData) return;
+    setExporting(true);
+    try {
+      const rows = [
+        ...(ctData.engineers || []).map(r => ['Engineer', r.name, MEMBER_GROUPS[r.name] || '', r.ticketCount, r.avgDays]),
+        ...(ctData.qa || []).map(r => ['QA', r.name, MEMBER_GROUPS[r.name] || '', r.ticketCount, r.avgDays]),
+      ];
+      await exportToSheets('CycleTime_Snapshot', ['Type', 'Name', 'Team', 'Tickets', 'Avg Days'], rows);
+      showExport(true, 'Exported');
+    } catch { showExport(false, 'Failed'); }
+    setExporting(false);
   };
+
+  const toggleEng = name => setExpandedEng(p => ({ ...p, [name]: !p[name] }));
+  const toggleQA  = name => setExpandedQA(p => ({ ...p, [name]: !p[name] }));
 
   return (
     <div>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-        <h1 className="page-title" style={{margin: 0}}>⏱ Cycle Time</h1>
-        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
-          <button className="btn" onClick={exportToSheets} disabled={exporting || !data} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
-            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
+      <div className="page-header">
+        <div>
+          <div className="page-title">Cycle Time</div>
+          <div className="page-sub">
+            Engineer: In Progress → Done &nbsp;·&nbsp; QA: QA Assigned → UAT / Done
+          </div>
+        </div>
+        <div className="page-header-right">
+          <ExportMsg msg={exportMsg} />
+          <button className="btn btn-emerald" onClick={doExport} disabled={exporting || !ctData}>
+            {exporting ? 'Exporting…' : 'Export to Sheets'}
           </button>
         </div>
       </div>
-      <p style={{ color: '#888', marginBottom: 20, fontSize: 14 }}>
-        Engineer time: <strong>In Progress → Done/Deployed</strong> &nbsp;|&nbsp;
-        QA time: <strong>QA Assignee set → UAT/Done/Deployed</strong>
-      </p>
 
       {/* Filter bar */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
         <MultiSelect
           label="Projects"
           options={PROJECTS}
           selected={selectedProjects}
           onChange={setSelectedProjects}
+          colorMap={PROJ_COLORS}
         />
         <MultiSelect
           label="Teams"
@@ -327,75 +223,69 @@ function CycleTime() {
           onChange={setSelectedTeams}
           colorMap={GROUP_COLORS}
         />
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: 13, color: '#555' }}>From</label>
-          <input type="date" value={startDate} max={endDate}
-            onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label style={{ fontSize: 12, color: 'var(--text-2)' }}>From</label>
+          <input type="date" value={startDate} max={endDate} onChange={e => setStartDate(e.target.value)} />
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: 13, color: '#555' }}>To</label>
-          <input type="date" value={endDate} min={startDate} max={today()}
-            onChange={e => setEndDate(e.target.value)} style={inputStyle} />
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label style={{ fontSize: 12, color: 'var(--text-2)' }}>To</label>
+          <input type="date" value={endDate} min={startDate} max={today()} onChange={e => setEndDate(e.target.value)} />
         </div>
-
-        <button
-          className="btn btn-primary"
-          onClick={handleApply}
-          disabled={loading}
-          style={{ background: '#1a1a2e', color: 'white', padding: '7px 18px', fontSize: 13 }}
-        >
-          {loading ? 'Loading...' : 'Apply'}
+        <button className="btn btn-emerald" onClick={handleApply} disabled={loading}>
+          {loading ? 'Loading…' : 'Apply'}
         </button>
       </div>
 
       {/* Active filter chips */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
+      <div className="chip-row">
         {appliedFilters.projects.map(p => (
-          <span key={p} style={{ background: (BRAND_COLORS[p] || '#3730a3') + '18', color: BRAND_COLORS[p] || '#3730a3', border: `1.5px solid ${(BRAND_COLORS[p] || '#3730a3')}50`, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+          <span key={p} className="chip active" style={{ background: (PROJ_COLORS[p] || '#6B7280') + '18', color: PROJ_COLORS[p] || '#6B7280', borderColor: (PROJ_COLORS[p] || '#6B7280') + '40' }}>
             {p}
           </span>
         ))}
         {selectedTeams.length < ALL_TEAMS.length && selectedTeams.map(t => (
-          <span key={t} style={{ background: (GROUP_COLORS[t] || '#94a3b8') + '20', color: GROUP_COLORS[t] || '#94a3b8', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+          <span key={t} className="chip active" style={{ background: (GROUP_COLORS[t] || '#9CA3AF') + '18', color: GROUP_COLORS[t] || '#9CA3AF', borderColor: (GROUP_COLORS[t] || '#9CA3AF') + '40' }}>
             {t}
           </span>
         ))}
-        <span style={{ background: '#f0f2f5', color: '#555', padding: '2px 10px', borderRadius: 12, fontSize: 12 }}>
+        <span className="chip" style={{ cursor: 'default' }}>
           {appliedFilters.start} – {appliedFilters.end}
         </span>
       </div>
 
       {loading && (
-        <div className="loading">
-          Fetching changelogs for {appliedFilters.projects.join(', ')} ({appliedFilters.start} – {appliedFilters.end})… may take a moment.
-        </div>
+        <Loading text={`Fetching changelogs for ${appliedFilters.projects.join(', ')} — may take a moment…`} />
       )}
-      {error && <div style={{ color: '#dc2626', marginBottom: 16 }}>Error: {error}</div>}
 
-      {data && !loading && (
+      {error && (
+        <div style={{ color: 'var(--badge-red-text)', fontSize: 13, marginBottom: 16 }}>Error: {error}</div>
+      )}
+
+      {ctData && !loading && (
         <>
-          <p style={{ color: '#888', fontSize: 13, marginBottom: 20 }}>
-            {data.totalIssues} issues scanned across {appliedFilters.projects.join(', ')}
+          <p style={{ color: 'var(--text-2)', fontSize: 12, marginBottom: 18 }}>
+            {ctData.totalIssues} issues scanned across {appliedFilters.projects.join(', ')}
           </p>
+
           <CycleTimeTable
-            data={data.engineers}
+            data={ctData.engineers}
             label="Engineer Cycle Time (In Progress → Done)"
-            expandedRows={expandedEngineer}
-            onToggle={n => setExpandedEngineer(prev => ({ ...prev, [n]: !prev[n] }))}
+            color="#10B981"
             selectedTeams={selectedTeams}
+            expandedRows={expandedEng}
+            onToggle={toggleEng}
           />
+
           <CycleTimeTable
-            data={data.qa}
+            data={ctData.qa}
             label="QA Cycle Time (QA Assigned → UAT / Done)"
-            expandedRows={expandedQA}
-            onToggle={n => setExpandedQA(prev => ({ ...prev, [n]: !prev[n] }))}
+            color="#8B5CF6"
             selectedTeams={selectedTeams}
+            expandedRows={expandedQA}
+            onToggle={toggleQA}
           />
         </>
       )}
     </div>
   );
 }
-
-export default CycleTime;

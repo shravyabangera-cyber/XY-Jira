@@ -1,221 +1,183 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE, PROJECTS, PROJ_COLORS, Loading, ExportMsg, useExportMsg, exportToSheets } from '../utils';
 
-const API_BASE = 'http://localhost:3001/api';
-const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
+const MAX_LOAD = 15; // tickets that = 100% on the bar
 
-const BRAND_COLORS = {
-  XYPOS: '#3b82f6',
-  OMSXY: '#22c55e',
-  BEYON: '#8b5cf6',
-  FAB: '#f59e0b',
-};
+function LoadBar({ total }) {
+  const pct = Math.min(Math.round(total / MAX_LOAD * 100), 100);
+  const color = total >= 10 ? '#EF4444' : total >= 5 ? '#F59E0B' : '#10B981';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="load-bar-track">
+        <div className="load-bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span style={{ fontSize: 11, color, fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 24 }}>{total}</span>
+    </div>
+  );
+}
 
-function Resources() {
+export default function Resources() {
   const [resourceData, setResourceData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
   const [selectedSprints, setSelectedSprints] = useState({});
   const [selectedProject, setSelectedProject] = useState('XYPOS');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('total');
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, showExport] = useExportMsg();
 
   useEffect(() => {
-    const fetchSprints = async () => {
-      const sprintResults = {};
-      const defaultSelected = {};
-      for (const project of PROJECTS) {
+    (async () => {
+      const sr = {}, ds = {};
+      for (const p of PROJECTS) {
         try {
-          const response = await axios.get(`${API_BASE}/active-sprints/${project}`);
-          sprintResults[project] = response.data.sprints || [];
-          if (sprintResults[project].length > 0) {
-            defaultSelected[project] = sprintResults[project][0].id;
-          }
-        } catch (error) {
-          sprintResults[project] = [];
-        }
+          const r = await axios.get(`${API_BASE}/active-sprints/${p}`);
+          sr[p] = r.data.sprints || [];
+          if (sr[p].length) ds[p] = sr[p][0].id;
+        } catch { sr[p] = []; }
       }
-      setActiveSprints(sprintResults);
-      setSelectedSprints(defaultSelected);
-    };
-    fetchSprints();
+      setActiveSprints(sr); setSelectedSprints(ds);
+    })();
   }, []);
 
   useEffect(() => {
-    if (Object.keys(selectedSprints).length === 0) return;
-    const fetchData = async () => {
+    if (!Object.keys(selectedSprints).length) return;
+    (async () => {
       const results = {};
-      for (const project of PROJECTS) {
+      for (const p of PROJECTS) {
         try {
-          const response = await axios.get(`${API_BASE}/resources/${project}`);
-          const allIssues = response.data.issues || [];
-          const selectedSprintId = selectedSprints[project];
-          const issues = selectedSprintId
-            ? allIssues.filter(issue =>
-                issue.fields?.customfield_10020?.some(s => s.id === selectedSprintId)
-              )
-            : allIssues;
-
-          const assigneeMap = {};
-          for (const issue of issues) {
-            const fields = issue.fields || {};
-            const status = fields.status?.name || '';
-            const s = status.toLowerCase();
-            const qaAssignee = fields['customfield_11368'];
-            let assignee;
-            if (s === 'qa' && qaAssignee?.displayName) {
-              assignee = qaAssignee.displayName;
-            } else {
-              assignee = fields.assignee?.displayName || 'Unassigned';
-            }
-            if (!assigneeMap[assignee]) {
-              assigneeMap[assignee] = { name: assignee, total: 0, inProgress: 0, qa: 0, uat: 0, backlog: 0, done: 0, deployed: 0 };
-            }
-            assigneeMap[assignee].total++;
-            if (s === 'in progress') assigneeMap[assignee].inProgress++;
-            else if (s === 'qa') assigneeMap[assignee].qa++;
-            else if (s === 'uat') assigneeMap[assignee].uat++;
-            else if (s === 'backlog') assigneeMap[assignee].backlog++;
-            else if (s === 'done') assigneeMap[assignee].done++;
-            else if (s === 'deployed') assigneeMap[assignee].deployed++;
+          const r = await axios.get(`${API_BASE}/resources/${p}`);
+          const all = r.data.issues || [], sid = selectedSprints[p];
+          const issues = sid ? all.filter(i => i.fields?.customfield_10020?.some(s => s.id === sid)) : all;
+          const map = {};
+          for (const i of issues) {
+            const f = i.fields || {}, st = (f.status?.name || '').toLowerCase();
+            const qa = f.customfield_11368;
+            const name = (st === 'qa' && qa?.displayName) ? qa.displayName : (f.assignee?.displayName || 'Unassigned');
+            if (!map[name]) map[name] = { name, total: 0, inProgress: 0, qa: 0, uat: 0, backlog: 0, done: 0, deployed: 0 };
+            map[name].total++;
+            if (st === 'in progress') map[name].inProgress++;
+            else if (st === 'qa') map[name].qa++;
+            else if (st === 'uat') map[name].uat++;
+            else if (st === 'backlog') map[name].backlog++;
+            else if (st === 'done') map[name].done++;
+            else if (st === 'deployed') map[name].deployed++;
           }
-          results[project] = Object.values(assigneeMap).sort((a, b) => b.total - a.total);
-        } catch (error) {
-          results[project] = [];
-        }
+          results[p] = Object.values(map);
+        } catch { results[p] = []; }
       }
-      setResourceData(results);
-      setLoading(false);
-    };
-    fetchData();
+      setResourceData(results); setLoading(false);
+    })();
   }, [selectedSprints]);
 
-  const [exporting, setExporting] = React.useState(false);
-  const [exportMsg, setExportMsg] = React.useState('');
-
-  const exportToSheets = async () => {
+  const doExport = async () => {
     setExporting(true);
-    setExportMsg('');
     try {
-      const headers = ['Project', 'Name', 'Total', 'In Progress', 'QA', 'UAT', 'Backlog', 'Done', 'Deployed'];
       const rows = [];
-      for (const project of PROJECTS) {
-        for (const person of (resourceData[project] || [])) {
-          rows.push([project, person.name, person.total, person.inProgress, person.qa, person.uat, person.backlog, person.done, person.deployed]);
-        }
-      }
-      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Resources_Snapshot', headers, rows });
-      setExportMsg('✅ Exported to Google Sheets');
-    } catch (err) {
-      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
-    }
+      for (const p of PROJECTS)
+        for (const r of (resourceData[p] || []))
+          rows.push([p, r.name, r.total, r.inProgress, r.qa, r.uat, r.backlog, r.done, r.deployed]);
+      await exportToSheets('Resources_Snapshot', ['Project', 'Name', 'Total', 'In Progress', 'QA', 'UAT', 'Backlog', 'Done', 'Deployed'], rows);
+      showExport(true, 'Exported');
+    } catch { showExport(false, 'Failed'); }
     setExporting(false);
-    setTimeout(() => setExportMsg(''), 4000);
   };
 
-  if (loading) return <div className="loading">Loading resources...</div>;
+  if (loading) return <Loading text="Loading resources…" />;
 
-  const people = (resourceData[selectedProject] || []).filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase())
+  const sprints  = activeSprints[selectedProject] || [];
+  const color    = PROJ_COLORS[selectedProject];
+
+  const people = (resourceData[selectedProject] || [])
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortKey === 'total') return b.total - a.total;
+      if (sortKey === 'active') return (b.inProgress + b.qa + b.uat) - (a.inProgress + a.qa + a.uat);
+      if (sortKey === 'name') return a.name.localeCompare(b.name);
+      return 0;
+    });
+
+  const highLoad = people.filter(p => p.total >= 10).length;
+  const idle     = people.filter(p => p.inProgress + p.qa + p.uat === 0 && p.total > 0).length;
+
+  const SortTh = ({ k, label }) => (
+    <th onClick={() => setSortKey(k)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+      {label}{sortKey === k ? ' ↓' : ''}
+    </th>
   );
-  const sprints = activeSprints[selectedProject] || [];
 
   return (
     <div>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-        <h1 className="page-title" style={{margin: 0}}>👥 Resource Utilization</h1>
-        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
-          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
-            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
-          </button>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Resources</div>
+          <div className="page-sub">Team utilisation across the active sprint</div>
+        </div>
+        <div className="page-header-right">
+          <ExportMsg msg={exportMsg} />
+          <button className="btn btn-emerald" onClick={doExport} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Sheets'}</button>
         </div>
       </div>
-      
-      <div style={{marginBottom: 16}}>
-        <input
-          type="text"
-          placeholder="Search team member..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, width: 250}}
-        />
-      </div>
 
-      <div style={{marginBottom: 24, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
         {PROJECTS.map(p => (
-          <button
-            key={p}
-            className="btn"
-            style={{background: selectedProject === p ? '#1a1a2e' : 'white', color: selectedProject === p ? 'white' : '#333', border: '1px solid #ddd'}}
-            onClick={() => setSelectedProject(p)}
-          >
-            {p}
-          </button>
+          <button key={p} className={`btn ${selectedProject === p ? 'btn-proj-active' : ''}`} onClick={() => setSelectedProject(p)}>{p}</button>
         ))}
-
         {sprints.length > 1 && (
-          <select
-            style={{padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, marginLeft: 8}}
-            value={selectedSprints[selectedProject] || ''}
-            onChange={e => {
-              setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) }));
-              setLoading(true);
-            }}
-          >
-            {sprints.map(sprint => (
-              <option key={sprint.id} value={sprint.id}>{sprint.name}</option>
-            ))}
+          <select value={selectedSprints[selectedProject] || ''} onChange={e => { setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) })); setLoading(true); }}>
+            {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}
       </div>
 
-      <div className="table-container" style={{borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
-        <div style={{marginBottom: 10}}>
-          <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
-            {selectedProject}
-          </span>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <input type="text" placeholder="Search member…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} />
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[['total', 'Load'], ['active', 'Active'], ['name', 'Name']].map(([k, l]) => (
+            <button key={k} className={`btn ${sortKey === k ? 'btn-primary' : ''}`} onClick={() => setSortKey(k)} style={{ fontSize: 11, padding: '5px 10px' }}>{l}</button>
+          ))}
         </div>
+        {(highLoad > 0 || idle > 0) && (
+          <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
+            {highLoad > 0 && <span className="badge badge-red">{highLoad} overloaded</span>}
+            {idle > 0     && <span className="badge badge-zinc">{idle} idle</span>}
+          </div>
+        )}
+      </div>
+
+      <div className="table-container" style={{ borderLeft: `3px solid ${color}50` }}>
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Total</th>
-              <th>In Progress</th>
-              <th>QA</th>
-              <th>UAT</th>
-              <th>Backlog</th>
-              <th>Done</th>
-              <th>Deployed</th>
-              <th>Load</th>
+              <SortTh k="name"   label="Name" />
+              <SortTh k="total"  label="Load" />
+              <th>In Progress</th><th>QA</th><th>UAT</th><th>Backlog</th><th>Done</th><th>Deployed</th>
             </tr>
           </thead>
           <tbody>
-            {people.map(person => {
-              const loadClass = person.total >= 10 ? 'badge-red' : person.total >= 5 ? 'badge-amber' : 'badge-green';
-              const loadLabel = person.total >= 10 ? 'High' : person.total >= 5 ? 'Medium' : 'Low';
+            {people.map(p => {
+              const active = p.inProgress + p.qa + p.uat;
               return (
-                <tr key={person.name}>
+                <tr key={p.name}>
                   <td>
-                    <a href={`/member/${encodeURIComponent(person.name)}`} style={{color: '#2563eb', fontWeight: 600, textDecoration: 'none'}}>
-                      {person.name}
-                    </a>
+                    <a href={`/member/${encodeURIComponent(p.name)}`} style={{ color: 'var(--emerald)', fontWeight: 500 }}>{p.name}</a>
+                    {active === 0 && p.total > 0 && <span className="badge badge-zinc" style={{ marginLeft: 8, fontSize: 10 }}>idle</span>}
                   </td>
-                  <td>{person.total}</td>
-                  <td>{person.inProgress}</td>
-                  <td>{person.qa}</td>
-                  <td>{person.uat}</td>
-                  <td>{person.backlog}</td>
-                  <td>{person.done}</td>
-                  <td>{person.deployed}</td>
-                  <td><span className={`badge ${loadClass}`}>{loadLabel}</span></td>
+                  <td><LoadBar total={p.total} /></td>
+                  <td style={{ color: p.inProgress > 0 ? 'var(--badge-amber-text)' : 'var(--text-3)', fontWeight: p.inProgress > 0 ? 600 : 400 }}>{p.inProgress}</td>
+                  <td style={{ color: p.qa > 0 ? 'var(--badge-blue-text)' : 'var(--text-3)', fontWeight: p.qa > 0 ? 600 : 400 }}>{p.qa}</td>
+                  <td>{p.uat}</td><td style={{ color: 'var(--text-3)' }}>{p.backlog}</td>
+                  <td style={{ color: 'var(--badge-green-text)', fontWeight: p.done > 0 ? 600 : 400 }}>{p.done}</td>
+                  <td style={{ color: 'var(--badge-green-text)', fontWeight: p.deployed > 0 ? 600 : 400 }}>{p.deployed}</td>
                 </tr>
               );
             })}
+            {!people.length && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-2)', padding: '24px 0' }}>No members found</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
   );
 }
-
-export default Resources;

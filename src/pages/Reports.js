@@ -1,96 +1,55 @@
 import React, { useState } from 'react';
 
-const WEBHOOKS = {
-  'Sprint Health Report': 'http://localhost:3001/api/trigger/sprint-health',
-  'Burndown Report': 'http://localhost:3001/api/trigger/burndown',
-  'Resource Utilization': 'http://localhost:3001/api/trigger/resource-utilization',
-  'Sprint Snapshot': 'http://localhost:3001/api/trigger/sprint-snapshot',
-  'Velocity Data': 'http://localhost:3001/api/trigger/velocity-data',
-};
+const REPORTS = [
+  { name: 'Sprint Health Report', desc: 'Sends sprint health for all 4 projects to Slack', icon: '📡', endpoint: 'http://localhost:3001/api/trigger/sprint-health' },
+  { name: 'Burndown Report', desc: 'Daily burndown chart to Slack and Google Sheets', icon: '📉', endpoint: 'http://localhost:3001/api/trigger/burndown' },
+  { name: 'Resource Utilization', desc: 'Resource utilisation report to Slack and Google Sheets', icon: '👥', endpoint: 'http://localhost:3001/api/trigger/resource-utilization' },
+  { name: 'Sprint Snapshot', desc: 'Full sprint productivity snapshot to Google Sheets — run before closing a sprint', icon: '📸', endpoint: 'http://localhost:3001/api/trigger/sprint-snapshot', important: true },
+  { name: 'Velocity Data', desc: 'Velocity metrics for current sprint saved to Google Sheets', icon: '📊', endpoint: 'http://localhost:3001/api/trigger/velocity-data', important: true },
+];
 
-function Reports() {
+export default function Reports() {
   const [loading, setLoading] = useState({});
   const [results, setResults] = useState({});
 
-  const triggerReport = async (reportName) => {
-    setLoading(prev => ({ ...prev, [reportName]: true }));
-    setResults(prev => ({ ...prev, [reportName]: '' }));
+  const trigger = async (name, endpoint) => {
+    setLoading(p => ({ ...p, [name]: true }));
+    setResults(p => ({ ...p, [name]: '' }));
     try {
-      await fetch(WEBHOOKS[reportName], {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ triggered: true, timestamp: new Date().toISOString() })
-      });
-      setResults(prev => ({ ...prev, [reportName]: '✅ Done! Check Slack or Google Sheets.' }));
-    } catch (error) {
-      setResults(prev => ({ ...prev, [reportName]: '❌ Failed to trigger.' }));
+      await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ triggered: true, timestamp: new Date().toISOString() }) });
+      setResults(p => ({ ...p, [name]: '✅ Done — check Slack or Google Sheets.' }));
+    } catch {
+      setResults(p => ({ ...p, [name]: '❌ Failed to trigger.' }));
     }
-    setLoading(prev => ({ ...prev, [reportName]: false }));
+    setLoading(p => ({ ...p, [name]: false }));
+    setTimeout(() => setResults(p => ({ ...p, [name]: '' })), 5000);
   };
-
-  const reports = [
-    {
-      name: 'Sprint Health Report',
-      description: 'Sends sprint health for all 4 projects to Slack',
-      icon: '🗂',
-      color: '#dbeafe'
-    },
-    {
-      name: 'Burndown Report',
-      description: 'Sends daily burndown chart to Slack and Google Sheets',
-      icon: '📉',
-      color: '#dcfce7'
-    },
-    {
-      name: 'Resource Utilization',
-      description: 'Sends resource utilization report to Slack and Google Sheets',
-      icon: '👥',
-      color: '#fef9c3'
-    },
-    {
-      name: 'Sprint Snapshot',
-      description: 'Saves a full sprint productivity snapshot to Google Sheets before closing the sprint',
-      icon: '📸',
-      color: '#fee2e2',
-      important: true
-    },
-    {
-      name: 'Velocity Data',
-      description: 'Saves velocity metrics for current sprint to Google Sheets',
-      icon: '📊',
-      color: '#dbeafe',
-      important: true
-    }
-  ];
 
   return (
     <div>
-      <h1 className="page-title">📋 Reports</h1>
-      <p style={{color: '#888', marginBottom: 24}}>Manually trigger reports to Slack or save snapshots to Google Sheets</p>
-
-      <div className="cards-grid">
-        {reports.map(report => (
-          <div className="card" key={report.name} style={{border: report.important ? '2px solid #ef4444' : '1px solid #f0f2f5'}}>
-            <div style={{fontSize: 32, marginBottom: 12}}>{report.icon}</div>
-            <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 8}}>
-              {report.name}
-              {report.important && <span style={{marginLeft: 8, fontSize: 11, background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 10}}>Run before closing sprint</span>}
-            </h3>
-            <p style={{fontSize: 13, color: '#888', marginBottom: 16}}>
-              {report.description}
-            </p>
-            {results[report.name] && (
-              <p style={{fontSize: 13, marginBottom: 12, color: results[report.name].includes('✅') ? '#22c55e' : '#ef4444'}}>
-                {results[report.name]}
-              </p>
+      <div className="page-title">Reports</div>
+      <div className="page-sub">Trigger n8n automations or save snapshots to Google Sheets</div>
+      <div className="grid-3" style={{ marginTop: 20 }}>
+        {REPORTS.map(r => (
+          <div key={r.name} className="card" style={{ borderTop: r.important ? '2px solid #EF4444' : undefined }}>
+            <div style={{ fontSize: 24, marginBottom: 10 }}>{r.icon}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+              {r.name}
+              {r.important && <span className="badge badge-red" style={{ marginLeft: 8, fontSize: 10 }}>Run before closing sprint</span>}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 14, lineHeight: 1.5 }}>{r.desc}</div>
+            {results[r.name] && (
+              <div style={{ fontSize: 12, marginBottom: 10, color: results[r.name].startsWith('✅') ? 'var(--badge-green-text)' : 'var(--badge-red-text)' }}>
+                {results[r.name]}
+              </div>
             )}
             <button
-              className="btn btn-primary"
-              onClick={() => triggerReport(report.name)}
-              disabled={loading[report.name]}
-              style={{width: '100%', background: report.important ? '#ef4444' : '#1a1a2e'}}
+              className="btn"
+              style={{ width: '100%', justifyContent: 'center', background: r.important ? '#EF4444' : 'var(--emerald)', borderColor: r.important ? '#EF4444' : 'var(--emerald)', color: 'white' }}
+              onClick={() => trigger(r.name, r.endpoint)}
+              disabled={loading[r.name]}
             >
-              {loading[report.name] ? '⏳ Running...' : report.important ? '📸 Save Snapshot' : '🚀 Trigger Report'}
+              {loading[r.name] ? 'Running…' : r.important ? 'Save Snapshot' : 'Trigger Report'}
             </button>
           </div>
         ))}
@@ -98,5 +57,3 @@ function Reports() {
     </div>
   );
 }
-
-export default Reports;

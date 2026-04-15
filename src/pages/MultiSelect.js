@@ -1,92 +1,58 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-function MultiSelect({ label, options, selected, onChange, colorMap }) {
+export default function MultiSelect({ label, options, selected, onChange, colorMap }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const toggle = (opt) => {
-    onChange(
-      selected.includes(opt) ? selected.filter(s => s !== opt) : [...selected, opt]
-    );
-  };
-
+  const toggle = opt => onChange(selected.includes(opt) ? selected.filter(s => s !== opt) : [...selected, opt]);
   const allSelected = selected.length === options.length;
   const toggleAll = () => onChange(allSelected ? [] : [...options]);
 
-  const summaryText =
-    selected.length === 0
-      ? `${label}: None`
-      : selected.length === options.length
-      ? `${label}: All`
-      : selected.length === 1
-      ? `${label}: ${selected[0]}`
-      : `${label}: ${selected.length} selected`;
+  const summary = selected.length === 0 ? `${label}: none`
+    : selected.length === options.length ? `${label}: all`
+    : selected.length === 1 ? `${label}: ${selected[0]}`
+    : `${label}: ${selected.length}`;
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '7px 12px', borderRadius: 8,
-          border: '1px solid #ddd', background: 'white',
-          fontSize: 13, cursor: 'pointer', color: '#333',
-          minWidth: 160, justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '7px 12px', borderRadius: 7,
+          border: '1px solid var(--input-border)',
+          background: 'var(--input-bg)', fontSize: 12.5, cursor: 'pointer',
+          color: 'var(--input-text)', minWidth: 160, justifyContent: 'space-between', fontFamily: 'var(--font)',
         }}
       >
-        <span>{summaryText}</span>
-        <span style={{ fontSize: 10, color: '#999' }}>{open ? '▲' : '▼'}</span>
+        <span>{summary}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-3)' }}>{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
         <div style={{
-          position: 'absolute', top: '110%', left: 0, zIndex: 100,
-          background: 'white', border: '1px solid #ddd', borderRadius: 10,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 200,
-          padding: '6px 0', maxHeight: 320, overflowY: 'auto',
+          position: 'absolute', top: '110%', left: 0, zIndex: 200,
+          background: 'var(--card-bg)', border: '1px solid var(--border)',
+          borderRadius: 9, boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          minWidth: 200, padding: '4px 0', maxHeight: 300, overflowY: 'auto',
         }}>
-          <div
-            onClick={toggleAll}
-            style={{
-              padding: '7px 14px', fontSize: 13, cursor: 'pointer',
-              color: '#1a1a2e', fontWeight: 600,
-              borderBottom: '1px solid #f0f0f0',
-              background: allSelected ? '#f0f4ff' : 'white',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
-          >
-            <input type="checkbox" readOnly checked={allSelected} style={{ accentColor: '#1a1a2e' }} />
+          <div onClick={toggleAll} style={{ padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', color: 'var(--text)', fontWeight: 500, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" readOnly checked={allSelected} style={{ accentColor: 'var(--emerald)' }} />
             All
           </div>
-
           {options.map(opt => {
             const color = colorMap?.[opt];
             const checked = selected.includes(opt);
             return (
-              <div
-                key={opt}
-                onClick={() => toggle(opt)}
-                style={{
-                  padding: '7px 14px', fontSize: 13, cursor: 'pointer',
-                  background: checked ? '#f8f9ff' : 'white',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                }}
-              >
-                <input type="checkbox" readOnly checked={checked} style={{ accentColor: color || '#1a1a2e' }} />
-                {color && (
-                  <span style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: color, display: 'inline-block', flexShrink: 0,
-                  }} />
-                )}
+              <div key={opt} onClick={() => toggle(opt)} style={{ padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', background: checked ? 'var(--bg-2)' : 'transparent', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
+                <input type="checkbox" readOnly checked={checked} style={{ accentColor: color || 'var(--emerald)' }} />
+                {color && <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />}
                 {opt}
               </div>
             );
@@ -96,5 +62,3 @@ function MultiSelect({ label, options, selected, onChange, colorMap }) {
     </div>
   );
 }
-
-export default MultiSelect;
