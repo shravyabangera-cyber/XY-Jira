@@ -1,365 +1,197 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  API_BASE, PROJECTS, PROJ_COLORS,
+  ProjBadge, Loading, ExportMsg, useExportMsg, exportToSheets,
+  CHART_GRID, CHART_TICK,
+} from '../utils';
 
-const API_BASE = 'http://localhost:3001/api';
-const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
+function buildBurndown(issues, sprintInfo, total, completed) {
+  if (!sprintInfo?.startDate || !sprintInfo?.endDate) return [];
+  const start = new Date(sprintInfo.startDate), end = new Date(sprintInfo.endDate), now = new Date();
+  const days = Math.ceil((end - start) / 864e5);
+  const pts = [];
+  for (let i = 0; i <= days; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i);
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    pts.push({ date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), ideal: Math.round(total - total * (i / days)), actual: d <= now ? total - completed : null });
+  }
+  return pts;
+}
 
-const BRAND_COLORS = {
-  XYPOS: '#3b82f6',
-  OMSXY: '#22c55e',
-  BEYON: '#8b5cf6',
-  FAB: '#f59e0b',
-};
-
-function Sprints() {
+export default function Sprints() {
   const [sprintData, setSprintData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
   const [selectedSprints, setSelectedSprints] = useState({});
   const [selectedProject, setSelectedProject] = useState('XYPOS');
   const [loading, setLoading] = useState(true);
   const [velocityData, setVelocityData] = useState([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, showExport] = useExportMsg();
 
   useEffect(() => {
-    const fetchSprints = async () => {
-      const sprintResults = {};
-      const defaultSelected = {};
-      for (const project of PROJECTS) {
-        try {
-          const response = await axios.get(`${API_BASE}/active-sprints/${project}`);
-          sprintResults[project] = response.data.sprints || [];
-          if (sprintResults[project].length > 0) {
-            defaultSelected[project] = sprintResults[project][0].id;
-          }
-        } catch (error) {
-          sprintResults[project] = [];
-        }
+    (async () => {
+      const sr = {}, ds = {};
+      for (const p of PROJECTS) {
+        try { const r = await axios.get(`${API_BASE}/active-sprints/${p}`); sr[p] = r.data.sprints || []; if (sr[p].length) ds[p] = sr[p][0].id; } catch { sr[p] = []; }
       }
-      setActiveSprints(sprintResults);
-      setSelectedSprints(defaultSelected);
-    };
-    fetchSprints();
+      setActiveSprints(sr); setSelectedSprints(ds);
+      try { const v = await axios.get(`${API_BASE}/velocity-data`); setVelocityData(v.data.data || []); } catch {}
+    })();
   }, []);
 
   useEffect(() => {
-    const fetchVelocity = async () => {
-      try {
-        const response = await axios.get(`${API_BASE}/velocity-data`);
-        setVelocityData(response.data.data || []);
-      } catch (error) {
-        console.error('Error fetching velocity data:', error);
-      }
-    };
-    fetchVelocity();
-  }, []);
-
-  useEffect(() => {
-    if (Object.keys(selectedSprints).length === 0) return;
-    const fetchData = async () => {
+    if (!Object.keys(selectedSprints).length) return;
+    (async () => {
       const results = {};
-      for (const project of PROJECTS) {
+      for (const p of PROJECTS) {
         try {
-          const response = await axios.get(`${API_BASE}/sprint-health/${project}`);
-          const allIssues = response.data.issues || [];
-          const selectedSprintId = selectedSprints[project];
-          const issues = selectedSprintId
-            ? allIssues.filter(issue =>
-                issue.fields?.customfield_10020?.some(s => s.id === selectedSprintId)
-              )
-            : allIssues;
-
-          const sprintInfo = issues[0]?.fields?.customfield_10020?.find(s => s.id === selectedSprintId);
-          const sprintName = sprintInfo?.name || 'Unknown Sprint';
-          const startDate = sprintInfo?.startDate || '';
-          const endDate = sprintInfo?.endDate || '';
-
-          const statusCounts = {
-            Backlog: 0, Solutioning: 0, 'In Progress': 0,
-            QA: 0, UAT: 0, Reopened: 0, Done: 0, Deployed: 0, Rejected: 0
-          };
-          for (const issue of issues) {
-            const status = issue.fields?.status?.name || '';
-            const matched = Object.keys(statusCounts).find(
-              s => s.toLowerCase() === status.toLowerCase()
-            );
-            if (matched) statusCounts[matched]++;
-          }
-          const total = issues.length;
-          const completed = statusCounts.Done + statusCounts.Deployed;
-          const donePct = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-          const burndownData = [];
-          if (startDate && endDate) {
-            const SPRINT_START = new Date(startDate);
-            const SPRINT_END = new Date(endDate);
-            const today = new Date();
-            const totalDays = Math.ceil((SPRINT_END - SPRINT_START) / (1000 * 60 * 60 * 24));
-            for (let i = 0; i <= totalDays; i++) {
-              const date = new Date(SPRINT_START);
-              date.setDate(date.getDate() + i);
-              if (date.getDay() === 0 || date.getDay() === 6) continue;
-              const ideal = Math.round(total - (total * (i / totalDays)));
-              const isToday = date <= today;
-              burndownData.push({
-                date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                ideal,
-                actual: isToday ? (total - completed) : null
-              });
-            }
-          }
-
-          results[project] = { sprintName, startDate, endDate, statusCounts, total, completed, donePct, burndownData };
-        } catch (error) {
-          results[project] = { error: true };
-        }
+          const r = await axios.get(`${API_BASE}/sprint-health/${p}`);
+          const all = r.data.issues || [], sid = selectedSprints[p];
+          const issues = sid ? all.filter(i => i.fields?.customfield_10020?.some(s => s.id === sid)) : all;
+          const si = issues[0]?.fields?.customfield_10020?.find(s => s.id === sid);
+          const sc = { Backlog: 0, Solutioning: 0, 'In Progress': 0, QA: 0, UAT: 0, Reopened: 0, Done: 0, Deployed: 0, Rejected: 0 };
+          for (const i of issues) { const k = Object.keys(sc).find(s => s.toLowerCase() === (i.fields?.status?.name || '').toLowerCase()); if (k) sc[k]++; }
+          const total = issues.length, completed = sc.Done + sc.Deployed, donePct = total > 0 ? Math.round(completed / total * 100) : 0;
+          results[p] = { sprintName: si?.name || '', startDate: si?.startDate, endDate: si?.endDate, sc, total, completed, donePct, burndown: buildBurndown(issues, si, total, completed) };
+        } catch { results[p] = { error: true }; }
       }
-      setSprintData(results);
-      setLoading(false);
-    };
-    fetchData();
+      setSprintData(results); setLoading(false);
+    })();
   }, [selectedSprints]);
 
-  const [exporting, setExporting] = React.useState(false);
-  const [exportMsg, setExportMsg] = React.useState('');
-
-  const exportToSheets = async () => {
+  const doExport = async () => {
     setExporting(true);
-    setExportMsg('');
     try {
-      const headers = ['Project', 'Sprint', 'Status', 'Count', 'Total', 'Completed', 'Complete %'];
       const rows = [];
-      for (const project of PROJECTS) {
-        const d = sprintData[project] || {};
-        const s = d.statusCounts || {};
-        Object.entries(s).forEach(([status, count]) => {
-          rows.push([project, d.sprintName || '', status, count, d.total || 0, d.completed || 0, d.donePct || 0]);
-        });
-      }
-      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Sprints_Snapshot', headers, rows });
-      setExportMsg('✅ Exported to Google Sheets');
-    } catch (err) {
-      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
-    }
+      for (const p of PROJECTS) { const d = sprintData[p] || {}; Object.entries(d.sc || {}).forEach(([st, cnt]) => rows.push([p, d.sprintName || '', st, cnt, d.total || 0, d.completed || 0, d.donePct || 0])); }
+      await exportToSheets('Sprints_Snapshot', ['Project', 'Sprint', 'Status', 'Count', 'Total', 'Completed', 'Complete %'], rows);
+      showExport(true, 'Exported');
+    } catch { showExport(false, 'Failed'); }
     setExporting(false);
-    setTimeout(() => setExportMsg(''), 4000);
   };
 
-  if (loading) return <div className="loading">Loading sprints...</div>;
+  if (loading) return <Loading text="Loading sprint data..." />;
 
-  const data = sprintData[selectedProject] || {};
-  const s = data.statusCounts || {};
-  const progressWidth = `${data.donePct || 0}%`;
-  const statusChartData = Object.entries(s).map(([name, value]) => ({ name, value }));
+  const d = sprintData[selectedProject] || {};
+  const sc = d.sc || {};
+  const color = PROJ_COLORS[selectedProject];
+  const pct = d.donePct || 0;
   const sprints = activeSprints[selectedProject] || [];
+  const statusChartData = Object.entries(sc).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value }));
+  const STATUS_FILL = { 'In Progress': '#F59E0B', QA: '#8B5CF6', UAT: '#06B6D4', Done: '#10B981', Deployed: '#059669', Reopened: '#EF4444' };
 
   return (
     <div>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-        <h1 className="page-title" style={{margin: 0}}>🗂 Active Sprints</h1>
-        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
-          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
-            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
-          </button>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Active Sprints</div>
+          <div className="page-sub">Burndown, status breakdown & velocity trends</div>
+        </div>
+        <div className="page-header-right">
+          <ExportMsg msg={exportMsg} />
+          <button className="btn btn-emerald" onClick={doExport} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Sheets'}</button>
         </div>
       </div>
 
-      <div style={{marginBottom: 24, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18, alignItems: 'center' }}>
         {PROJECTS.map(p => (
-          <button
-            key={p}
-            className="btn"
-            style={{background: selectedProject === p ? '#1a1a2e' : 'white', color: selectedProject === p ? 'white' : '#333', border: '1px solid #ddd'}}
-            onClick={() => setSelectedProject(p)}
-          >
-            {p}
-          </button>
+          <button key={p} className={`btn ${selectedProject === p ? 'btn-proj-active' : ''}`} onClick={() => setSelectedProject(p)}>{p}</button>
         ))}
-
         {sprints.length > 1 && (
-          <select
-            style={{padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, marginLeft: 8}}
-            value={selectedSprints[selectedProject] || ''}
-            onChange={e => {
-              setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) }));
-              setLoading(true);
-            }}
-          >
-            {sprints.map(sprint => (
-              <option key={sprint.id} value={sprint.id}>{sprint.name}</option>
-            ))}
+          <select value={selectedSprints[selectedProject] || ''} onChange={e => { setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) })); setLoading(true); }}>
+            {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}
       </div>
 
-      <div className="card" style={{marginBottom: 20, borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
+      <div className="card" style={{ marginBottom: 18, borderLeft: `3px solid ${color}50` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
           <div>
-            <div style={{marginBottom: 6}}>
-              <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
-                {selectedProject}
-              </span>
+            <div style={{ marginBottom: 6 }}><ProjBadge project={selectedProject} /></div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>{d.sprintName}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+              {d.startDate ? new Date(d.startDate).toLocaleDateString() : ''} → {d.endDate ? new Date(d.endDate).toLocaleDateString() : ''}
             </div>
-            <h3 style={{fontSize: 18, color: '#1a1a2e', textTransform: 'none', marginBottom: 4}}>{data.sprintName}</h3>
-            <p style={{fontSize: 13, color: '#888'}}>
-              {data.startDate ? new Date(data.startDate).toLocaleDateString() : ''} → {data.endDate ? new Date(data.endDate).toLocaleDateString() : ''}
-            </p>
           </div>
-          <div style={{textAlign: 'right'}}>
-            <div style={{fontSize: 32, fontWeight: 700}}>{data.donePct}%</div>
-            <div style={{fontSize: 13, color: '#888'}}>Complete</div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 30, fontWeight: 700, color }}>{pct}%</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)' }}>complete</div>
           </div>
         </div>
-        <div style={{background: '#f0f2f5', borderRadius: 8, height: 8, marginBottom: 16}}>
-          <div style={{background: '#22c55e', borderRadius: 8, height: 8, width: progressWidth, transition: 'width 0.5s'}}></div>
-        </div>
-        <div style={{display: 'flex', gap: 16}}>
-          <div style={{textAlign: 'center', padding: '8px 16px', background: '#f0f2f5', borderRadius: 8}}>
-            <div style={{fontSize: 20, fontWeight: 700}}>{data.total}</div>
-            <div style={{fontSize: 11, color: '#888'}}>Total</div>
-          </div>
-          <div style={{textAlign: 'center', padding: '8px 16px', background: '#dcfce7', borderRadius: 8}}>
-            <div style={{fontSize: 20, fontWeight: 700, color: '#16a34a'}}>{data.completed}</div>
-            <div style={{fontSize: 11, color: '#16a34a'}}>Completed</div>
-          </div>
-          <div style={{textAlign: 'center', padding: '8px 16px', background: '#fee2e2', borderRadius: 8}}>
-            <div style={{fontSize: 20, fontWeight: 700, color: '#dc2626'}}>{data.total - data.completed}</div>
-            <div style={{fontSize: 11, color: '#dc2626'}}>Remaining</div>
-          </div>
+        <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%`, background: color }} /></div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          {[{ label: 'Total', val: d.total, bg: 'var(--bg-3)', c: 'var(--text)' }, { label: 'Done', val: d.completed, bg: 'var(--badge-green-bg)', c: 'var(--badge-green-text)' }, { label: 'Remaining', val: (d.total || 0) - (d.completed || 0), bg: 'var(--badge-red-bg)', c: 'var(--badge-red-text)' }].map(x => (
+            <div key={x.label} style={{ padding: '8px 14px', background: x.bg, borderRadius: 7, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: x.c }}>{x.val}</div>
+              <div style={{ fontSize: 10, color: x.c, opacity: 0.8 }}>{x.label}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20}}>
+      <div className="grid-2">
         <div className="card">
-          <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>📉 Burndown Chart</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data.burndownData || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-              <XAxis dataKey="date" tick={{fontSize: 11}} />
-              <YAxis tick={{fontSize: 11}} />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="ideal" stroke="#94a3b8" strokeDasharray="5 5" name="Ideal" dot={false} />
-              <Line type="monotone" dataKey="actual" stroke="#ef4444" strokeWidth={2} name="Actual" dot={false} connectNulls={false} />
+          <h3>Burndown</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={d.burndown || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+              <XAxis dataKey="date" tick={{ ...CHART_TICK, fontSize: 10 }} />
+              <YAxis tick={CHART_TICK} />
+              <Tooltip contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="ideal" stroke="#9CA3AF" strokeDasharray="5 5" name="Ideal" dot={false} />
+              <Line type="monotone" dataKey="actual" stroke="#EF4444" strokeWidth={2} name="Actual" dot={false} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
-
         <div className="card">
-          <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>📊 Status Breakdown</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={statusChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-              <XAxis dataKey="name" tick={{fontSize: 10}} />
-              <YAxis tick={{fontSize: 11}} />
-              <Tooltip />
-              <Bar dataKey="value" fill="#1a1a2e" radius={[4, 4, 0, 0]} />
+          <h3>Status breakdown</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={statusChartData} barSize={20}>
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+              <XAxis dataKey="name" tick={{ ...CHART_TICK, fontSize: 10 }} />
+              <YAxis tick={CHART_TICK} />
+              <Tooltip contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12 }} />
+              <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]}>
+                {statusChartData.map((e, i) => <Bar key={i} fill={STATUS_FILL[e.name] || color} fillOpacity={0.8} />)}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       {velocityData.length > 0 && (
-        <div style={{marginTop: 24}}>
-          <h2 style={{fontSize: 20, fontWeight: 700, color: '#1a1a2e', marginBottom: 20}}>📊 Velocity & Quality Charts</h2>
-
-          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20}}>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>📋 Planned vs Completed (Tickets)</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="PlannedTickets" name="Planned" fill="#1a1a2e" radius={[4,4,0,0]} />
-                  <Bar dataKey="CompletedTickets" name="Completed" fill="#22c55e" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>⭐ Planned vs Completed (Story Points)</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="PlannedPoints" name="Planned" fill="#1a1a2e" radius={[4,4,0,0]} />
-                  <Bar dataKey="CompletedPoints" name="Completed" fill="#22c55e" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>🔀 Adhoc Load</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="AdhocTickets" name="Adhoc Tickets" fill="#f59e0b" radius={[4,4,0,0]} />
-                  <Bar dataKey="AdhocPoints" name="Adhoc Points" fill="#fcd34d" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>🚨 Client Disruption Load</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="ClientDisruptionTickets" name="Tickets" fill="#ef4444" radius={[4,4,0,0]} />
-                  <Bar dataKey="ClientDisruptionPoints" name="Points" fill="#fca5a5" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>🐛 Bug Ratio</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="BugTickets" name="Bug Tickets" fill="#8b5cf6" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 style={{fontSize: 16, color: '#1a1a2e', textTransform: 'none', marginBottom: 16}}>🔒 Blocked & Reopened Tickets</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={velocityData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f2f5" />
-                  <XAxis dataKey="Sprint" tick={{fontSize: 10}} />
-                  <YAxis tick={{fontSize: 11}} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="BlockedTickets" name="Blocked" fill="#ef4444" radius={[4,4,0,0]} />
-                  <Bar dataKey="DefinitionIncompleteTickets" name="Def. Incomplete" fill="#f59e0b" radius={[4,4,0,0]} />
-                  <Bar dataKey="ReopenedTickets" name="Reopened" fill="#94a3b8" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
+        <>
+          <div className="sep" />
+          <div className="section-title" style={{ fontSize: 16, marginBottom: 16 }}>Velocity & Quality</div>
+          <div className="grid-2">
+            {[
+              { title: 'Planned vs Completed (Tickets)', datasets: [{ key: 'PlannedTickets', label: 'Planned', color: '#6B7280' }, { key: 'CompletedTickets', label: 'Completed', color: '#10B981' }] },
+              { title: 'Planned vs Completed (Story Points)', datasets: [{ key: 'PlannedPoints', label: 'Planned SP', color: '#6B7280' }, { key: 'CompletedPoints', label: 'Done SP', color: '#10B981' }] },
+              { title: 'Adhoc Load', datasets: [{ key: 'AdhocTickets', label: 'Tickets', color: '#F59E0B' }, { key: 'AdhocPoints', label: 'Points', color: '#FCD34D' }] },
+              { title: 'Blocked & Reopened', datasets: [{ key: 'BlockedTickets', label: 'Blocked', color: '#EF4444' }, { key: 'DefinitionIncompleteTickets', label: 'Def. Incomplete', color: '#F59E0B' }, { key: 'ReopenedTickets', label: 'Reopened', color: '#9CA3AF' }] },
+            ].map(({ title, datasets }) => (
+              <div className="card" key={title}>
+                <h3>{title}</h3>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={velocityData} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+                    <XAxis dataKey="Sprint" tick={{ ...CHART_TICK, fontSize: 9 }} />
+                    <YAxis tick={CHART_TICK} />
+                    <Tooltip contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    {datasets.map(({ key, label, color: c }) => (
+                      <Bar key={key} dataKey={key} name={label} fill={c} fillOpacity={0.8} radius={[2, 2, 0, 0]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ))}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
 }
-
-export default Sprints;

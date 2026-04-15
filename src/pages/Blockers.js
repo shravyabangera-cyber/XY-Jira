@@ -1,197 +1,183 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
+import {
+  API_BASE, PROJECTS, PROJ_COLORS,
+  ProjBadge, StatusBadge, Loading, ExportMsg, useExportMsg, exportToSheets,
+} from '../utils';
 
-const API_BASE = 'http://localhost:3001/api';
-const PROJECTS = ['XYPOS', 'OMSXY', 'BEYON', 'FAB'];
+function blockerAgeDays(issue) {
+  // Use created date as proxy for "how long has this been sitting"
+  const created = issue.fields?.created;
+  if (!created) return null;
+  return Math.floor((new Date() - new Date(created)) / 864e5);
+}
 
-const BRAND_COLORS = {
-  XYPOS: '#3b82f6',
-  OMSXY: '#22c55e',
-  BEYON: '#8b5cf6',
-  FAB: '#f59e0b',
-};
+function AgeLabel({ days }) {
+  if (days === null) return <span className="blocker-age blocker-age-ok">—</span>;
+  if (days >= 7)  return <span className="blocker-age blocker-age-urgent">{days}d</span>;
+  if (days >= 3)  return <span className="blocker-age blocker-age-warn">{days}d</span>;
+  return <span className="blocker-age blocker-age-ok">{days}d</span>;
+}
 
-function Blockers() {
+export default function Blockers() {
   const [blockerData, setBlockerData] = useState({});
   const [activeSprints, setActiveSprints] = useState({});
   const [selectedSprints, setSelectedSprints] = useState({});
   const [selectedProject, setSelectedProject] = useState('XYPOS');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, showExport] = useExportMsg();
   const location = useLocation();
-  const queryProject = new URLSearchParams(location.search).get('project');
-
- useEffect(() => {
-  if (queryProject && PROJECTS.includes(queryProject)) {
-    setSelectedProject(queryProject);
-  }
-}, [queryProject]);
 
   useEffect(() => {
-    const fetchSprints = async () => {
-      const sprintResults = {};
-      const defaultSelected = {};
-      for (const project of PROJECTS) {
+    const qp = new URLSearchParams(location.search).get('project');
+    if (qp && PROJECTS.includes(qp)) setSelectedProject(qp);
+  }, [location.search]);
+
+  useEffect(() => {
+    (async () => {
+      const sr = {}, ds = {};
+      for (const p of PROJECTS) {
         try {
-          const response = await axios.get(`${API_BASE}/active-sprints/${project}`);
-          sprintResults[project] = response.data.sprints || [];
-          if (sprintResults[project].length > 0) {
-            defaultSelected[project] = sprintResults[project][0].id;
-          }
-        } catch (error) {
-          sprintResults[project] = [];
-        }
+          const r = await axios.get(`${API_BASE}/active-sprints/${p}`);
+          sr[p] = r.data.sprints || [];
+          if (sr[p].length) ds[p] = sr[p][0].id;
+        } catch { sr[p] = []; }
       }
-      setActiveSprints(sprintResults);
-      setSelectedSprints(defaultSelected);
-    };
-    fetchSprints();
+      setActiveSprints(sr); setSelectedSprints(ds);
+    })();
   }, []);
 
   useEffect(() => {
-    if (Object.keys(selectedSprints).length === 0) return;
-    const fetchData = async () => {
+    if (!Object.keys(selectedSprints).length) return;
+    (async () => {
       const results = {};
-      for (const project of PROJECTS) {
+      for (const p of PROJECTS) {
         try {
-          const response = await axios.get(`${API_BASE}/blockers/${project}`);
-          const allIssues = response.data.issues || [];
-          const selectedSprintId = selectedSprints[project];
-          const issues = selectedSprintId
-            ? allIssues.filter(issue =>
-                issue.fields?.customfield_10020?.some(s => s.id === selectedSprintId)
-              )
-            : allIssues;
-          results[project] = issues;
-        } catch (error) {
-          results[project] = [];
-        }
+          const r = await axios.get(`${API_BASE}/blockers/${p}`);
+          const all = r.data.issues || [], sid = selectedSprints[p];
+          const issues = sid ? all.filter(i => i.fields?.customfield_10020?.some(s => s.id === sid)) : all;
+          // Sort oldest-first so the most urgent appear at top
+          issues.sort((a, b) => new Date(a.fields?.created) - new Date(b.fields?.created));
+          results[p] = issues;
+        } catch { results[p] = []; }
       }
-      setBlockerData(results);
-      setLoading(false);
-    };
-    fetchData();
+      setBlockerData(results); setLoading(false);
+    })();
   }, [selectedSprints]);
 
-  const [exporting, setExporting] = React.useState(false);
-  const [exportMsg, setExportMsg] = React.useState('');
-
-  const exportToSheets = async () => {
+  const doExport = async () => {
     setExporting(true);
-    setExportMsg('');
     try {
-      const headers = ['Project', 'Ticket', 'Summary', 'Status', 'Assignee', 'Blocker Reason'];
       const rows = [];
-      for (const project of PROJECTS) {
-        for (const issue of (blockerData[project] || [])) {
-          rows.push([
-            project,
-            issue.key,
-            issue.fields?.summary || '',
-            issue.fields?.status?.name || '',
-            issue.fields?.assignee?.displayName || 'Unassigned',
-            issue.fields?.customfield_10855?.value || 'Blocked',
-          ]);
-        }
-      }
-      await axios.post(`${API_BASE}/export-to-sheets`, { sheetName: 'Blockers_Snapshot', headers, rows });
-      setExportMsg('✅ Exported to Google Sheets');
-    } catch (err) {
-      setExportMsg('❌ ' + (err.response?.data?.error || err.message || 'Export failed'));
-    }
+      for (const p of PROJECTS)
+        for (const i of (blockerData[p] || []))
+          rows.push([p, i.key, i.fields?.summary || '', i.fields?.status?.name || '', i.fields?.assignee?.displayName || 'Unassigned', i.fields?.customfield_10855?.value || 'Blocked', blockerAgeDays(i) ?? '']);
+      await exportToSheets('Blockers_Snapshot', ['Project', 'Ticket', 'Summary', 'Status', 'Assignee', 'Hold Reason', 'Age (days)'], rows);
+      showExport(true, 'Exported');
+    } catch { showExport(false, 'Failed'); }
     setExporting(false);
-    setTimeout(() => setExportMsg(''), 4000);
   };
 
-  if (loading) return <div className="loading">Loading blockers...</div>;
+  if (loading) return <Loading text="Loading blockers…" />;
 
   const blockers = blockerData[selectedProject] || [];
-  const sprints = activeSprints[selectedProject] || [];
+  const sprints  = activeSprints[selectedProject] || [];
+  const color    = PROJ_COLORS[selectedProject];
+
+  const totalAge = blockers.reduce((s, i) => s + (blockerAgeDays(i) || 0), 0);
+  const avgAge   = blockers.length ? Math.round(totalAge / blockers.length) : 0;
+  const oldest   = blockers.length ? Math.max(...blockers.map(i => blockerAgeDays(i) || 0)) : 0;
 
   return (
     <div>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-        <h1 className="page-title" style={{margin: 0}}>🚨 Blockers</h1>
-        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-          {exportMsg && <span style={{fontSize: 13, color: exportMsg.includes('✅') ? '#22c55e' : '#ef4444'}}>{exportMsg}</span>}
-          <button className="btn" onClick={exportToSheets} disabled={exporting} style={{background: '#0f9d58', color: 'white', border: 'none'}}>
-            {exporting ? '⏳ Exporting...' : '📊 Export to Sheets'}
-          </button>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Blockers</div>
+          <div className="page-sub">Issues on hold or definition incomplete — sorted oldest first</div>
+        </div>
+        <div className="page-header-right">
+          <ExportMsg msg={exportMsg} />
+          <button className="btn btn-emerald" onClick={doExport} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Sheets'}</button>
         </div>
       </div>
-      <div style={{marginBottom: 24, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
-        {PROJECTS.map(p => (
-          <button
-            key={p}
-            className="btn"
-            style={{marginRight: 8, background: selectedProject === p ? '#1a1a2e' : 'white', color: selectedProject === p ? 'white' : '#333', border: '1px solid #ddd'}}
-            onClick={() => setSelectedProject(p)}
-          >
-            {p} {blockerData[p]?.length > 0 && (
-              <span style={{background: '#ef4444', color: 'white', borderRadius: 10, padding: '2px 6px', fontSize: 11, marginLeft: 4}}>
-                {blockerData[p].length}
-              </span>
-            )}
-          </button>
-        ))}
 
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18, alignItems: 'center' }}>
+        {PROJECTS.map(p => {
+          const cnt = blockerData[p]?.length || 0;
+          return (
+            <button key={p} className={`btn ${selectedProject === p ? 'btn-proj-active' : ''}`} onClick={() => setSelectedProject(p)}>
+              {p}
+              {cnt > 0 && <span style={{ background: '#EF4444', color: 'white', borderRadius: 10, padding: '1px 6px', fontSize: 10, marginLeft: 4 }}>{cnt}</span>}
+            </button>
+          );
+        })}
         {sprints.length > 1 && (
           <select
-            style={{padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, marginLeft: 8}}
             value={selectedSprints[selectedProject] || ''}
-            onChange={e => {
-              setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) }));
-              setLoading(true);
-            }}
+            onChange={e => { setSelectedSprints(prev => ({ ...prev, [selectedProject]: parseInt(e.target.value) })); setLoading(true); }}
           >
-            {sprints.map(sprint => (
-              <option key={sprint.id} value={sprint.id}>{sprint.name}</option>
-            ))}
+            {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}
       </div>
 
       {blockers.length === 0 ? (
-        <div className="card">
-          <p style={{color: '#22c55e', fontWeight: 600}}>✅ No blockers found for {selectedProject}!</p>
-        </div>
+        <div className="card"><p style={{ color: 'var(--badge-green-text)', fontWeight: 600 }}>No blockers for {selectedProject} — all clear.</p></div>
       ) : (
-        <div className="table-container" style={{borderLeft: `4px solid ${BRAND_COLORS[selectedProject]}`}}>
-          <div style={{marginBottom: 10}}>
-            <span style={{background: BRAND_COLORS[selectedProject] + '18', color: BRAND_COLORS[selectedProject], border: `1.5px solid ${BRAND_COLORS[selectedProject]}50`, padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700}}>
-              {selectedProject}
-            </span>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Ticket</th>
-                <th>Summary</th>
-                <th>Status</th>
-                <th>Assignee</th>
-                <th>Blocker Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {blockers.map(issue => (
-                <tr key={issue.id}>
-                  <td>
-                    <a href={`https://xyretail.atlassian.net/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 600}}>
-                      {issue.key}
-                    </a>
-                  </td>
-                  <td>{issue.fields?.summary}</td>
-                  <td><span className="badge badge-amber">{issue.fields?.status?.name}</span></td>
-                  <td>{issue.fields?.assignee?.displayName || 'Unassigned'}</td>
-                  <td><span className="badge badge-red">{issue.fields?.customfield_10855?.value || 'Blocked'}</span></td>
+        <>
+          {/* Age summary */}
+          {oldest >= 3 && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+              <div className="card" style={{ flex: 1, padding: '12px 16px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Total blocked</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--badge-red-text)' }}>{blockers.length}</div>
+              </div>
+              <div className="card" style={{ flex: 1, padding: '12px 16px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Avg age</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: avgAge >= 5 ? 'var(--badge-red-text)' : 'var(--badge-amber-text)' }}>{avgAge}d</div>
+              </div>
+              <div className="card" style={{ flex: 1, padding: '12px 16px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Oldest</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: oldest >= 7 ? 'var(--badge-red-text)' : 'var(--badge-amber-text)' }}>{oldest}d</div>
+              </div>
+            </div>
+          )}
+
+          <div className="table-container" style={{ borderLeft: `3px solid ${color}50` }}>
+            <div className="table-container-inner" style={{ paddingBottom: 0 }}>
+              <ProjBadge project={selectedProject} />
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticket</th><th>Summary</th><th>Status</th>
+                  <th>Assignee</th><th>Hold Reason</th>
+                  <th title="Days since ticket was created">Age</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {blockers.map(i => (
+                  <tr key={i.id}>
+                    <td>
+                      <a href={`https://xyretail.atlassian.net/browse/${i.key}`} target="_blank" rel="noreferrer"
+                        style={{ color: 'var(--emerald)', fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                        {i.key}
+                      </a>
+                    </td>
+                    <td style={{ maxWidth: 280 }}>{i.fields?.summary}</td>
+                    <td><StatusBadge status={i.fields?.status?.name} /></td>
+                    <td style={{ color: 'var(--text-2)', fontSize: 12 }}>{i.fields?.assignee?.displayName || 'Unassigned'}</td>
+                    <td><span className="badge badge-red">{i.fields?.customfield_10855?.value || 'Blocked'}</span></td>
+                    <td><AgeLabel days={blockerAgeDays(i)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
 }
-
-export default Blockers;
