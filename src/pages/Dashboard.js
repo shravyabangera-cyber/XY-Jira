@@ -221,7 +221,7 @@ export default function Dashboard() {
                 </div>
               )}
               <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text)', lineHeight: 1, marginBottom: 4 }}>{pct}%</div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 8 }}>complete</div>
+              <div style={{ fontSize: 11, color: 'var(--text)', marginBottom: 8 }}>complete</div>
               <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%`, background: color }} /></div>
               <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
                 <span>{d.total || 0} total</span>
@@ -246,8 +246,19 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
               <XAxis dataKey="name" tick={CHART_TICK} />
               <YAxis tick={CHART_TICK} domain={[0, 100]} unit="%" />
-              <Tooltip formatter={v => `${v}%`} contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12 }} />
-              <Bar dataKey="value" name="Complete" radius={[3, 3, 0, 0]}>
+              <Tooltip
+  formatter={v => `${v}%`}
+  contentStyle={{
+    background: 'var(--card-bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    fontSize: 12,
+    color: 'var(--text)',
+  }}
+  labelStyle={{ color: 'var(--text)', fontWeight: 600 }}
+  itemStyle={{ color: 'var(--text-2)' }}
+/>
+<Bar dataKey="value" name="Complete" radius={[3, 3, 0, 0]}>
                 {completionData.map((e, i) => <Cell key={i} fill={PROJ_COLORS[e.name]} fillOpacity={0.85} />)}
               </Bar>
             </BarChart>

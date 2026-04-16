@@ -1,22 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Cell,Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   API_BASE, PROJECTS, PROJ_COLORS,
   ProjBadge, Loading, ExportMsg, useExportMsg, exportToSheets,
   CHART_GRID, CHART_TICK,
 } from '../utils';
 
-function buildBurndown(issues, sprintInfo, total, completed) {
+function buildBurndown(issues, sprintInfo, total) {
   if (!sprintInfo?.startDate || !sprintInfo?.endDate) return [];
-  const start = new Date(sprintInfo.startDate), end = new Date(sprintInfo.endDate), now = new Date();
+  
+  const start = new Date(sprintInfo.startDate);
+  const end = new Date(sprintInfo.endDate);
+  const now = new Date();
   const days = Math.ceil((end - start) / 864e5);
-  const pts = [];
-  for (let i = 0; i <= days; i++) {
-    const d = new Date(start); d.setDate(d.getDate() + i);
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
-    pts.push({ date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), ideal: Math.round(total - total * (i / days)), actual: d <= now ? total - completed : null });
+
+  // Build a map of how many tickets were completed on each date
+  const completedByDate = {};
+  for (const issue of issues) {
+    const resolvedRaw = issue.fields?.resolutiondate || issue.fields?.statuscategorychangedate;
+    if (!resolvedRaw) continue;
+    const resolved = new Date(resolvedRaw);
+    if (resolved >= start && resolved <= now) {
+      const key = resolved.toDateString();
+      completedByDate[key] = (completedByDate[key] || 0) + 1;
+    }
   }
+
+  const pts = [];
+  let runningCompleted = 0;
+
+  for (let i = 0; i <= days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    if (d.getDay() === 0 || d.getDay() === 6) continue; // skip weekends
+
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const ideal = Math.round(total - (total * (i / days)));
+
+    // Accumulate completions up to this day
+    if (d <= now) {
+      runningCompleted += completedByDate[d.toDateString()] || 0;
+      pts.push({ date: label, ideal, actual: total - runningCompleted });
+    } else {
+      pts.push({ date: label, ideal, actual: null });
+    }
+  }
+
   return pts;
 }
 
@@ -54,7 +84,7 @@ export default function Sprints() {
           const sc = { Backlog: 0, Solutioning: 0, 'In Progress': 0, QA: 0, UAT: 0, Reopened: 0, Done: 0, Deployed: 0, Rejected: 0 };
           for (const i of issues) { const k = Object.keys(sc).find(s => s.toLowerCase() === (i.fields?.status?.name || '').toLowerCase()); if (k) sc[k]++; }
           const total = issues.length, completed = sc.Done + sc.Deployed, donePct = total > 0 ? Math.round(completed / total * 100) : 0;
-          results[p] = { sprintName: si?.name || '', startDate: si?.startDate, endDate: si?.endDate, sc, total, completed, donePct, burndown: buildBurndown(issues, si, total, completed) };
+          results[p] = { sprintName: si?.name || '', startDate: si?.startDate, endDate: si?.endDate, sc, total, completed, donePct, burndown: buildBurndown(issues, si, total) };
         } catch { results[p] = { error: true }; }
       }
       setSprintData(results); setLoading(false);
@@ -147,19 +177,31 @@ export default function Sprints() {
           </ResponsiveContainer>
         </div>
         <div className="card">
-          <h3>Status breakdown</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={statusChartData} barSize={20}>
-              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-              <XAxis dataKey="name" tick={{ ...CHART_TICK, fontSize: 10 }} />
-              <YAxis tick={CHART_TICK} />
-              <Tooltip contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12 }} />
-              <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]}>
-                {statusChartData.map((e, i) => <Bar key={i} fill={STATUS_FILL[e.name] || color} fillOpacity={0.8} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+  <h3>Status breakdown</h3>
+  <ResponsiveContainer width="100%" height={200}>
+    <BarChart data={statusChartData} barSize={20}>
+      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+      <XAxis dataKey="name" tick={{ ...CHART_TICK, fontSize: 10 }} />
+      <YAxis tick={CHART_TICK} />
+      <Tooltip
+        contentStyle={{
+          background: 'var(--card-bg)',
+          border: '1px solid var(--border)',
+          borderRadius: 7,
+          fontSize: 12,
+          color: 'var(--text)',
+        }}
+        labelStyle={{ color: 'var(--text)', fontWeight: 600 }}
+        itemStyle={{ color: 'var(--text-2)' }}
+      />
+      <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]}>
+        {statusChartData.map((e, i) => (
+          <Cell key={i} fill={STATUS_FILL[e.name] || color} fillOpacity={0.8} />  // 👈 Cell, not Bar
+        ))}
+      </Bar>
+    </BarChart>
+  </ResponsiveContainer>
+</div>
       </div>
 
       {velocityData.length > 0 && (
